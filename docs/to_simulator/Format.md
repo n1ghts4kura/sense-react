@@ -52,8 +52,9 @@ Field definitions:
   - `timeout > 0` means bounded execution timeout.
 - `team` (string, required): `red` or `blue`.
 - `command` (string, required): action name, must match one command in section 4.
-- `value` (object, required): action parameters.
-  - Contains command-specific fields if needed.
+- `value` (object, optional): action parameters.
+  - For parameterless commands, `value` can be omitted or sent as `{}`.
+  - For parameterized commands, `value` must be an object and contain command-specific fields.
 
 ## 3. Response Packet Format
 
@@ -89,7 +90,7 @@ Error response (recommended):
 Notes:
 
 1. Python validates `request_id` and `success` first.
-2. Some commands require `value` as `float` or `string` (see section 4).
+2. Some commands require `value` as `int`, `float`, or `string` (see section 4).
 3. For `success=false`, returning a string `value` is recommended for diagnostics.
 
 ## 4. Command I/O Specification
@@ -370,16 +371,98 @@ Request `value`:
 {}
 ```
 
+or omit `value` entirely.
+
 Response expectation:
 
-- Type: `Response`
+- Type: `IntResponse` on success
+- Required fields on success:
+  - `request_id` (string)
+  - `success` (bool, true)
+  - `value` (int, remaining ammo)
+- Error cases:
+  - no ammo: `success=false`, `value="error: no ammo"`
+  - other failures: `success=false`, `value` as error string
+
+### 4.3 Robot Status Commands
+
+#### BotHealthGetAction
+
+Request `value`:
+
+- Can be omitted.
+- If present, should be `{}`.
+
+Response expectation:
+
+- Type: `IntResponse`
+- Required fields:
+  - `request_id` (string)
+  - `success` (bool)
+  - `value` (int, current health)
+
+#### BotHealthSetAction
+
+Request `value`:
+
+```json
+{
+  "value": 50
+}
+```
+
+- `value` type: integer target health.
+- Unity should clamp to `[0, 100]`.
+
+Response expectation:
+
+- Type: `IntResponse`
+- Required fields:
+  - `request_id` (string)
+  - `success` (bool)
+  - `value` (int, clamped health)
+
+#### BotAmmoGetAction
+
+Request `value`:
+
+- Can be omitted.
+- If present, should be `{}`.
+
+Response expectation:
+
+- Type: `IntResponse`
+- Required fields:
+  - `request_id` (string)
+  - `success` (bool)
+  - `value` (int, current ammo)
+
+#### BotAmmoSetAction
+
+Request `value`:
+
+```json
+{
+  "value": 200
+}
+```
+
+- `value` type: integer target ammo, must be `>= 0`.
+
+Response expectation:
+
+- Type: `IntResponse`
+- Required fields:
+  - `request_id` (string)
+  - `success` (bool)
+  - `value` (int, resulting ammo)
 
 ## 5. Validation Rules (Server Side)
 
 Server should validate and reject invalid requests:
 
 1. Request is valid JSON object.
-2. Contains `request_id`, `team`, `command`, `value`.
+2. Contains `request_id`, `team`, and `command`. `value` is optional for parameterless commands.
 3. `team` in {`red`, `blue`}.
 4. `timeout` exists at top-level and is either `-1` or a positive integer.
 5. `command` is known and required params are present.

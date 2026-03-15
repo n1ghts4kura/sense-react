@@ -133,9 +133,25 @@ class TeamBotController:
         action = TurretPitchLimitGetAction(team=self.team)
         return self._send_action(action, FloatResponse)
 
+    def get_health(self):
+        action = BotHealthGetAction(team=self.team)
+        return self._send_action(action, IntResponse)
+
+    def set_health(self, value: int):
+        action = BotHealthSetAction(team=self.team, value=value)
+        return self._send_action(action, IntResponse)
+
+    def get_ammo(self):
+        action = BotAmmoGetAction(team=self.team)
+        return self._send_action(action, IntResponse)
+
+    def set_ammo(self, value: int):
+        action = BotAmmoSetAction(team=self.team, value=value)
+        return self._send_action(action, IntResponse)
+
     def fire(self):
         action = TurretFireAction(team=self.team)
-        return self._send_action(action, Response)
+        return self._send_action(action, IntResponse)
 
     def set_control_mode(self, mode: BotControlMode):
         action = BotControlModeSetAction(team=self.team, mode=mode)

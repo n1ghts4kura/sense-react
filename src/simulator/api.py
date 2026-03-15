@@ -92,6 +92,12 @@ class FloatResponse(Response):
     value: float = Field(0.0, description="The content of the response as a float number, which can be any relevant information returned by the simulator (e.g., current speed, angle, etc.)")
 
 
+class IntResponse(Response):
+    """A simple Response type where the value is an integer."""
+
+    value: int = Field(0, description="The content of the response as an integer value")
+
+
 # --- 1. Settings ---
 # - (1) Bot Control Mode Settings
 
@@ -153,6 +159,32 @@ class TurretPitchLimitGetAction(Action):
     """API Interface for Get Turret Pitch Limit Action"""
 
     pass
+
+
+# - (4) Robot Status
+
+class BotHealthGetAction(Action):
+    """API Interface for Get Bot Health Action"""
+
+    pass
+
+
+class BotHealthSetAction(Action):
+    """API Interface for Set Bot Health Action"""
+
+    value: int = Field(..., description="Target bot health value")
+
+
+class BotAmmoGetAction(Action):
+    """API Interface for Get Bot Ammo Action"""
+
+    pass
+
+
+class BotAmmoSetAction(Action):
+    """API Interface for Set Bot Ammo Action"""
+
+    value: int = Field(..., ge=0, description="Target bot ammo value, must be >= 0")
 
 
 # ------------------
@@ -528,6 +560,7 @@ __all__ = [
     "Action",
     "Response",
     "StringResponse",
+    "IntResponse",
     "BotControlMode",
     "BotControlModeSetAction",
     "BotControlModeGetAction",
@@ -538,6 +571,10 @@ __all__ = [
     "ChassisAngularSpeedGetAction",
     "TurretPitchLimitSetAction",
     "TurretPitchLimitGetAction",
+    "BotHealthGetAction",
+    "BotHealthSetAction",
+    "BotAmmoGetAction",
+    "BotAmmoSetAction",
     "ChassisForwardAction",
     "ChassisBackwardAction",
     "ChassisStrafeLeftAction",
