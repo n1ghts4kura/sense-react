@@ -6,6 +6,9 @@
 
 import json
 import os
+import atexit
+import threading
+import time
 from uuid import uuid4
 from enum import Enum
 from pydantic import BaseModel, Field
@@ -229,6 +232,254 @@ _WS_ORIGIN = os.getenv("SIMULATOR_WS_ORIGIN")
 _WS_SUBPROTOCOL = os.getenv("SIMULATOR_WS_SUBPROTOCOL")
 
 
+class _PendingRequest:
+    def __init__(self):
+        self.event = threading.Event()
+        self.response = None
+
+
+class _PersistentWsClient:
+    """Long-lived WebSocket client for request/response communication."""
+
+    def __init__(self):
+        self._ws = None
+        self._state = "DISCONNECTED"
+        self._state_lock = threading.Lock()
+        self._connect_lock = threading.Lock()
+        self._send_lock = threading.Lock()
+        self._pending_lock = threading.Lock()
+        self._pending = {}
+        self._recv_thread = None
+        self._stopping = False
+
+    def _build_ws(self, url: str, timeout_sec: float):
+        if _WS_ORIGIN and _WS_SUBPROTOCOL:
+            return create_connection(
+                url,
+                timeout=timeout_sec,
+                origin=_WS_ORIGIN,
+                subprotocols=[_WS_SUBPROTOCOL],
+            )
+        if _WS_ORIGIN:
+            return create_connection(
+                url,
+                timeout=timeout_sec,
+                origin=_WS_ORIGIN,
+            )
+        if _WS_SUBPROTOCOL:
+            return create_connection(
+                url,
+                timeout=timeout_sec,
+                subprotocols=[_WS_SUBPROTOCOL],
+            )
+        return create_connection(url, timeout=timeout_sec)
+
+    def _set_state(self, state: str):
+        with self._state_lock:
+            self._state = state
+
+    def _get_state(self) -> str:
+        with self._state_lock:
+            return self._state
+
+    def _is_connected(self) -> bool:
+        with self._state_lock:
+            return self._state == "CONNECTED" and self._ws is not None
+
+    def _fail_all_pending(self, reason: str):
+        with self._pending_lock:
+            pending_items = list(self._pending.items())
+            self._pending.clear()
+
+        for _, pending in pending_items:
+            pending.response = reason
+            pending.event.set()
+
+    def _handle_disconnect(self, reason: str):
+        self._set_state("DISCONNECTED")
+
+        ws = self._ws
+        self._ws = None
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+        self._fail_all_pending(reason)
+
+    def _recv_loop(self):
+        while not self._stopping:
+            ws = self._ws
+            if ws is None:
+                break
+
+            try:
+                message = ws.recv()
+            except WebSocketTimeoutException:
+                continue
+            except Exception as e:
+                if self._stopping or self._get_state() == "STOPPING":
+                    logger.debug("Persistent WebSocket recv loop exited during stopping")
+                    break
+
+                logger.error(f"Persistent WebSocket recv failed: {e}")
+                self._handle_disconnect(f"error: transport exception: {str(e)}")
+                break
+
+            if message is None:
+                if self._stopping or self._get_state() == "STOPPING":
+                    logger.debug("Persistent WebSocket recv got None during stopping")
+                    break
+                self._handle_disconnect("error: transport exception: connection closed by peer")
+                break
+
+            if isinstance(message, (bytes, bytearray)):
+                try:
+                    message = message.decode("utf-8").strip()
+                except UnicodeDecodeError:
+                    logger.debug("Persistent WebSocket ignored non-UTF8 binary frame")
+                    continue
+            elif isinstance(message, str):
+                message = message.strip()
+            else:
+                logger.debug(
+                    f"Persistent WebSocket ignored non-text frame type={type(message).__name__}"
+                )
+                continue
+
+            if not message:
+                if self._stopping or self._get_state() == "STOPPING":
+                    logger.debug("Persistent WebSocket recv got empty payload during stopping")
+                    break
+                self._handle_disconnect("error: transport exception: connection closed by peer")
+                break
+
+            try:
+                payload = json.loads(message)
+            except Exception:
+                if self._stopping or self._get_state() == "STOPPING":
+                    logger.debug("Persistent WebSocket ignored non-JSON payload during stopping")
+                else:
+                    logger.debug("Persistent WebSocket ignored non-JSON payload")
+                continue
+
+            request_id = payload.get("request_id")
+            if not request_id:
+                logger.debug("Persistent WebSocket ignored payload without request_id")
+                continue
+
+            with self._pending_lock:
+                pending = self._pending.pop(request_id, None)
+
+            if pending is None:
+                logger.debug(
+                    f"No pending waiter found for request_id={request_id}, response ignored"
+                )
+                continue
+
+            pending.response = message
+            pending.event.set()
+
+    def _ensure_connected(self, url: str, conn_timeout: int):
+        if self._is_connected():
+            return
+
+        with self._connect_lock:
+            if self._is_connected():
+                return
+
+            self._set_state("CONNECTING")
+            timeout_sec = max(conn_timeout / 1000, 0.1)
+            attempts = 3
+            backoff = [0.2, 0.5, 1.0]
+            last_error = None
+
+            for idx in range(attempts):
+                try:
+                    ws = self._build_ws(url, timeout_sec)
+                    ws.settimeout(1.0)
+                    self._ws = ws
+                    self._set_state("CONNECTED")
+
+                    self._recv_thread = threading.Thread(
+                        target=self._recv_loop,
+                        name="simulator-ws-recv",
+                        daemon=True,
+                    )
+                    self._recv_thread.start()
+                    logger.info(f"Persistent WebSocket connected to {url}")
+                    return
+                except Exception as e:
+                    last_error = e
+                    logger.error(
+                        f"Persistent WebSocket connect attempt {idx + 1}/{attempts} failed: {e}"
+                    )
+                    if idx < attempts - 1:
+                        time.sleep(backoff[idx])
+
+            self._set_state("DISCONNECTED")
+            raise RuntimeError(str(last_error) if last_error is not None else "unknown connect error")
+
+    def request(self, action: Action, url: str, conn_timeout: int) -> str:
+        if self._stopping:
+            return _local_error_response(action, "error: transport exception: client is stopping")
+
+        try:
+            self._ensure_connected(url, conn_timeout)
+        except Exception as e:
+            logger.error(f"Persistent WebSocket ensure-connected failed: {e}")
+            return _local_error_response(action, f"error: transport exception: {str(e)}")
+
+        pending = _PendingRequest()
+        with self._pending_lock:
+            self._pending[action.request_id] = pending
+
+        try:
+            with self._send_lock:
+                ws = self._ws
+                if ws is None:
+                    raise RuntimeError("connection lost before send")
+                ws.send(action.to_datapacket_str())
+        except Exception as e:
+            with self._pending_lock:
+                self._pending.pop(action.request_id, None)
+
+            logger.error(f"Persistent WebSocket send failed: {e}")
+            self._handle_disconnect(f"error: transport exception: {str(e)}")
+            return _local_error_response(action, f"error: transport exception: {str(e)}")
+
+        if not pending.event.wait(max(conn_timeout / 1000, 0.001)):
+            with self._pending_lock:
+                self._pending.pop(action.request_id, None)
+            logger.error(
+                f"Persistent WebSocket transport timed out after {conn_timeout} ms for request_id={action.request_id}"
+            )
+            return _local_error_response(action, f"error: transport timeout ({conn_timeout} ms)")
+
+        response = pending.response
+        if response is None:
+            return _local_error_response(action, "error: transport exception: empty response")
+
+        if response.startswith("error:"):
+            return _local_error_response(action, response)
+
+        return response
+
+    def close(self):
+        self._stopping = True
+        self._set_state("STOPPING")
+        self._handle_disconnect("error: transport exception: connection closed")
+
+        thread = self._recv_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=1.0)
+
+
+_PERSISTENT_CLIENT = _PersistentWsClient()
+atexit.register(_PERSISTENT_CLIENT.close)
+
+
 def _local_error_response(action: Action, message: str) -> str:
     """Build a JSON response for transport-layer failures on Python side."""
 
@@ -264,56 +515,13 @@ def request(
     """
 
     logger.debug(f"Sending action to simulator: {action}")
+    return _PERSISTENT_CLIENT.request(action=action, url=url, conn_timeout=conn_timeout)
 
-    ws = None
-    try:
-        timeout_sec = conn_timeout / 1000
-        if _WS_ORIGIN and _WS_SUBPROTOCOL:
-            ws = create_connection(
-                url,
-                timeout=timeout_sec,
-                origin=_WS_ORIGIN,
-                subprotocols=[_WS_SUBPROTOCOL],
-            )
-        elif _WS_ORIGIN:
-            ws = create_connection(
-                url,
-                timeout=timeout_sec,
-                origin=_WS_ORIGIN,
-            )
-        elif _WS_SUBPROTOCOL:
-            ws = create_connection(
-                url,
-                timeout=timeout_sec,
-                subprotocols=[_WS_SUBPROTOCOL],
-            )
-        else:
-            ws = create_connection(url, timeout=timeout_sec)
 
-        datapacket_str = action.to_datapacket_str()
-        ws.send(datapacket_str)
-        response_str = ws.recv()
+def close_connection() -> None:
+    """Close persistent simulator WebSocket connection."""
 
-        logger.debug(f"Received response from simulator: {response_str}")
-
-        return response_str if isinstance(response_str, str) else str(response_str) 
-
-    except WebSocketTimeoutException:
-        logger.error(
-            f"WebSocket transport timed out after {conn_timeout} ms when sending action: {action}"
-        )
-        return _local_error_response(action, f"error: transport timeout ({conn_timeout} ms)")
-
-    except Exception as e:
-        logger.error(f"Error during WebSocket communication: {e}")
-        return _local_error_response(action, f"error: transport exception: {str(e)}")
-
-    finally:
-        if ws is not None:
-            try:
-                ws.close()
-            except Exception:
-                pass
+    _PERSISTENT_CLIENT.close()
 
 
 __all__ = [
@@ -341,4 +549,5 @@ __all__ = [
     "TurretRotatePitchAction",
     "TurretFireAction",
     "request",
+    "close_connection",
 ]
