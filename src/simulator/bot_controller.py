@@ -111,7 +111,7 @@ class TeamBotController:
 
     def set_chassis_linear_speed(self, speed: float):
         action = ChassisLinearSpeedSetAction(team=self.team, speed=speed)
-        return self._send_action(action, Response)
+        return self._send_action(action, FloatResponse)
 
     def get_chassis_linear_velocity(self):
         action = ChassisLinearSpeedGetAction(team=self.team)
