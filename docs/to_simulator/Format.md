@@ -5,15 +5,28 @@ This document defines the WebSocket request/response protocol used by Python cli
 ## 1. Transport Basics
 
 - Protocol: WebSocket
-- Default endpoint: `ws://localhost:8765`
+- Default endpoint: `ws://localhost:8765/ws`
 - Interaction mode: single request -> single response
 - Message encoding: UTF-8 JSON string
+
+Python-side configurable options (environment variables):
+
+- `SIMULATOR_WS_URL`: full WebSocket URL, for example `ws://localhost:8765/ws`.
+- `SIMULATOR_WS_ORIGIN` (optional): Origin header used during WebSocket handshake.
+- `SIMULATOR_WS_SUBPROTOCOL` (optional): subprotocol sent during WebSocket handshake.
 
 Server requirements:
 
 1. For each received request packet, return exactly one response packet.
 2. Response must carry the same `request_id` as the request.
 3. Do not return non-JSON text.
+4. WebSocket handshake must be accepted on the configured endpoint path (default `/ws`).
+5. If Unity uses handshake constraints (Origin / Subprotocol), they must match Python config.
+
+Handshake behavior requirement:
+
+- For valid WebSocket upgrade request on the configured endpoint, server should complete handshake and return HTTP 101.
+- Returning HTTP 400 usually means endpoint path mismatch or handshake validation mismatch.
 
 ## 2. Request Packet Format
 
@@ -424,3 +437,18 @@ Response:
   "success": true
 }
 ```
+
+## 8. Unity Implementation Notes For Handshake
+
+Unity-side server should ensure:
+
+1. A dedicated WebSocket endpoint path is exposed (recommended: `/ws`).
+2. Incoming upgrade requests to that path are accepted as WebSocket requests.
+3. Path, Origin policy, and Subprotocol policy are explicit and logged.
+4. For rejected requests, log exact reason (path mismatch, origin mismatch, protocol mismatch).
+
+Suggested troubleshooting when Python sees `Handshake status 400 Bad Request`:
+
+1. Verify Python URL path equals Unity endpoint path.
+2. Verify whether Unity expects specific Origin; if yes set `SIMULATOR_WS_ORIGIN`.
+3. Verify whether Unity expects subprotocol; if yes set `SIMULATOR_WS_SUBPROTOCOL`.

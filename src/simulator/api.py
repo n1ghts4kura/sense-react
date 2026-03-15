@@ -5,6 +5,7 @@
 #
 
 import json
+import os
 from uuid import uuid4
 from enum import Enum
 from pydantic import BaseModel, Field
@@ -222,8 +223,10 @@ class TurretFireAction(Action):
 
 # ===========
 
-_BASE_URL = "ws://localhost:8765" # default URL for the Unity simulator's WebSocket server
+_BASE_URL = os.getenv("SIMULATOR_WS_URL", "ws://localhost:8765/ws")
 _CONN_TIMEOUT = 3000 # default timeout for connection attempts in milliseconds
+_WS_ORIGIN = os.getenv("SIMULATOR_WS_ORIGIN")
+_WS_SUBPROTOCOL = os.getenv("SIMULATOR_WS_SUBPROTOCOL")
 
 
 def _local_error_response(action: Action, message: str) -> str:
@@ -264,7 +267,29 @@ def request(
 
     ws = None
     try:
-        ws = create_connection(url, timeout=conn_timeout / 1000) # convert ms to seconds
+        timeout_sec = conn_timeout / 1000
+        if _WS_ORIGIN and _WS_SUBPROTOCOL:
+            ws = create_connection(
+                url,
+                timeout=timeout_sec,
+                origin=_WS_ORIGIN,
+                subprotocols=[_WS_SUBPROTOCOL],
+            )
+        elif _WS_ORIGIN:
+            ws = create_connection(
+                url,
+                timeout=timeout_sec,
+                origin=_WS_ORIGIN,
+            )
+        elif _WS_SUBPROTOCOL:
+            ws = create_connection(
+                url,
+                timeout=timeout_sec,
+                subprotocols=[_WS_SUBPROTOCOL],
+            )
+        else:
+            ws = create_connection(url, timeout=timeout_sec)
+
         datapacket_str = action.to_datapacket_str()
         ws.send(datapacket_str)
         response_str = ws.recv()
