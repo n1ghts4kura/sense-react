@@ -1,0 +1,9 @@
+# LLM support
+
+# openai
+# openai-agents
+dspy
+
+
+# Communication between Python and Unity
+websocket-client
