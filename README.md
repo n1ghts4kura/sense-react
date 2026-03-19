@@ -8,4 +8,4 @@ An agentic robot automatically controlling framework enhanced by LLM and VLM.
 
 ## 安装
 
-Python: 3.13.7
+Python: 3.13.7 ( 待定 )
