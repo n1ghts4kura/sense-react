@@ -194,6 +194,31 @@ get_control_mode = dspy.Tool(
     arg_desc = {}
 )
 
+tool_list = [
+    move_forward,
+    move_backward,
+    strafe_left,
+    strafe_right,
+    chassis_rotate_clockwise,
+    chassis_rotate_counter_clockwise,
+    turret_rotate_clockwise,
+    turret_rotate_counter_clockwise,
+    turret_rotate_pitch,
+    set_chassis_linear_speed,
+    get_chassis_linear_velocity,
+    set_chassis_angular_speed,
+    get_chassis_angular_velocity,
+    set_turret_pitch_limit,
+    get_turret_pitch_limit,
+    get_health,
+    set_health,
+    get_ammo,
+    set_ammo,
+    fire,
+    set_control_mode,
+    get_control_mode,
+]
+
 __all__ = [
     "move_forward",
     "move_backward",
@@ -217,4 +242,5 @@ __all__ = [
     "fire",
     "set_control_mode",
     "get_control_mode",
+    "tool_list",
 ]
