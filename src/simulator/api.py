@@ -259,7 +259,7 @@ class TurretFireAction(Action):
 # ===========
 
 _BASE_URL = os.getenv("SIMULATOR_WS_URL", "ws://localhost:8765/ws")
-_CONN_TIMEOUT = 3000 # default timeout for connection attempts in milliseconds
+_CONN_TIMEOUT = 1000 * 60 * 10 # default timeout for connection attempts in milliseconds
 _WS_ORIGIN = os.getenv("SIMULATOR_WS_ORIGIN")
 _WS_SUBPROTOCOL = os.getenv("SIMULATOR_WS_SUBPROTOCOL")
 
@@ -422,7 +422,8 @@ class _PersistentWsClient:
                 return
 
             self._set_state("CONNECTING")
-            timeout_sec = max(conn_timeout / 1000, 0.1)
+            # timeout_sec = max(conn_timeout / 1000, 0.1)
+            timeout_sec = conn_timeout / 1000
             attempts = 3
             backoff = [0.2, 0.5, 1.0]
             last_error = None
