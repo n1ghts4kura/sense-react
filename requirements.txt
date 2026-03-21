@@ -8,5 +8,8 @@ dspy
 # Communication between Python and Unity
 websocket-client
 
+# GUI
+PyQt6
+
 # Environment Configuration
 python-dotenv
