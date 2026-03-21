@@ -1,1 +1,1 @@
-from src.dspy_llm.online.deepseek import DeepSeekLM
+from src.dspy_llm.online.deepseek import deepseek_chat_lm, deepseek_reasoner_lm

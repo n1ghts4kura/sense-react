@@ -7,23 +7,25 @@
 
 
 import dspy
-from typing import Literal
 
 from dotenv import load_dotenv
 load_dotenv()
 
 
-class DeepSeekLM(dspy.LM):
+deepseek_chat_lm = dspy.LM(
+    model = "deepseek/deepseek-chat",
+    temperature = 0.0,
+    max_tokens = 8192,
+)
 
-    def __init__(
-        self,
-        type: Literal["chat", "reasoner"] = "chat",
-        *args,
-        **kwargs
-    ):
-        super().__init__(
-            model = f"deepseek/deepseek-{type}",
-            model_type = "chat",
-            *args,
-            **kwargs
-        )
+deepseek_reasoner_lm = dspy.LM(
+    model = "deepseek/deepseek-reasoner",
+    temperature = 0.0,
+    max_tokens = 8192,
+)
+
+
+__all__ = [
+    "deepseek_chat_lm",
+    "deepseek_reasoner_lm"
+]
