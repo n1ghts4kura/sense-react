@@ -8,7 +8,7 @@
 from time import sleep
 from typing import Literal
 from pydantic import BaseModel, Field
-from subprocess import Popen
+from subprocess import DEVNULL, Popen
 
 
 _current_port = 9000
@@ -68,6 +68,16 @@ class LLaMAModelSettings(BaseModel):
     port: str = Field(default_factory=lambda: str(_current_port))
 
 
+def _get_next_port() -> int:
+    """
+    Get the next available port and increment the counter.
+    """
+    global _current_port
+    port = _current_port
+    _current_port += 1
+    return port
+
+
 def run_model(
     model_settings: LLaMAModelSettings,
     server_settings: LLaMAServerSettings
@@ -78,7 +88,7 @@ def run_model(
     Args:
         model_settings: The settings for the model.
         server_settings: The settings for the server.
-    
+
     Returns:
         A Popen object representing the running server process.
     """
@@ -104,7 +114,7 @@ def run_model(
     ]
     cmd = [c for c in cmd if c is not None]
 
-    process = Popen(cmd) 
+    process = Popen(cmd, stdout=DEVNULL, stderr=DEVNULL)
 
     # Wait 15 seconds for the server to start
     sleep(15)
@@ -112,8 +122,5 @@ def run_model(
     if process.poll() is not None:
         # The process has already exited, which means it failed to start
         raise RuntimeError(f"Failed to start LLaMA Server for model {model_settings.alias}")
-
-    # Increment the current port for the next server
-    _current_port += 1
 
     return process
